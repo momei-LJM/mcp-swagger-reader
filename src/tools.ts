@@ -212,9 +212,7 @@ export function registerTools(
       description: "根据关键词搜索API接口",
       inputSchema: z.object({
         projectName: z.string().describe("项目名称"),
-        keyword: z
-          .string()
-          .describe("搜索关键词，会在路径、摘要、描述中搜索"),
+        keyword: z.string().describe("搜索关键词，会在路径、摘要、描述中搜索"),
       }),
     },
     async ({
@@ -308,14 +306,23 @@ export function registerTools(
   mcp.registerTool(
     "generate_ts_by_endpoint",
     {
-      description: "根据 API 接口路径和方法生成 TypeScript 类型（请求参数、Body、响应）",
+      description:
+        "根据 API 接口路径和方法生成 TypeScript 类型（请求参数、Body、响应），作为模型输入，可以进一步调整并输出",
       inputSchema: z.object({
         projectName: z.string().describe("项目名称"),
         path: z.string().describe("API路径，如 /access/packageUnit/queryList"),
         method: z.string().describe("HTTP方法，如 GET, POST, PUT, DELETE"),
       }),
     },
-    async ({ projectName, path, method }: { projectName: string; path: string; method: string }) => {
+    async ({
+      projectName,
+      path,
+      method,
+    }: {
+      projectName: string;
+      path: string;
+      method: string;
+    }) => {
       const project = projects.get(projectName);
       if (!project || !project.spec) {
         return {
@@ -331,7 +338,8 @@ export function registerTools(
       // 从全量类型中提取接口相关的类型
       const endpoints = extractEndpoints(project.spec);
       const endpoint = endpoints.find(
-        (ep) => ep.path === path && ep.method.toLowerCase() === method.toLowerCase(),
+        (ep) =>
+          ep.path === path && ep.method.toLowerCase() === method.toLowerCase(),
       );
 
       if (!endpoint) {
@@ -352,7 +360,9 @@ export function registerTools(
       if (endpoint.requestBody) {
         const bodyContent = endpoint.requestBody.content?.["application/json"];
         if (bodyContent?.schema?.$ref) {
-          usedSchemas.add(bodyContent.schema.$ref.replace("#/components/schemas/", ""));
+          usedSchemas.add(
+            bodyContent.schema.$ref.replace("#/components/schemas/", ""),
+          );
         }
       }
 
@@ -388,62 +398,24 @@ export function registerTools(
       if (extracted && !extracted.includes("not found")) {
         results.push(extracted);
       } else {
-        // 如果没找到专门的类型，尝试找 Request/Response 相关的
-        results.push(`// 类型定义请参考项目全量类型`);
+        // 如果没找到专门的类型，使用 generateTypeScriptByEndpoint 展开 Schema
+        const expandedCode = generateTypeScriptByEndpoint(path, method, project.spec);
+        if (expandedCode && !expandedCode.includes("未找到") && !expandedCode.includes("无需生成")) {
+          results.push(expandedCode);
+        } else {
+          results.push(`// 未能自动生成类型，请参考项目全量类型`);
+        }
       }
 
+      const finalResult = results.join("\n");
       return {
-        content: [{ type: "text", text: results.join("\n") || fullTypes.slice(0, 5000) }],
+        content: [
+          {
+            type: "text",
+            text: finalResult || `// 无类型信息可用`,
+          },
+        ],
       };
-    },
-  );
-
-  // 工具：根据 Schema 名称生成 TypeScript interface（使用 openapi-typescript）
-  mcp.registerTool(
-    "generate_ts_interfaces",
-    {
-      description: "根据 Schema 名称生成 TypeScript interface 定义",
-      inputSchema: z.object({
-        projectName: z.string().describe("项目名称"),
-        schemaName: z.string().describe("Schema 名称，如 包装单位"),
-      }),
-    },
-    async ({ projectName, schemaName }: { projectName: string; schemaName: string }) => {
-      const project = projects.get(projectName);
-      if (!project || !project.spec) {
-        return {
-          content: [
-            { type: "text", text: `项目 "${projectName}" 未找到或未加载` },
-          ],
-        };
-      }
-
-      try {
-        // 使用 openapi-typescript 生成全量类型
-        const fullTypes = await generateFullTypeScript(project.spec, projectName);
-
-        if (fullTypes.startsWith("// Error")) {
-          return { content: [{ type: "text", text: fullTypes }] };
-        }
-
-        // 提取指定的 Schema 类型
-        const typeCode = extractSchemaType(fullTypes, schemaName);
-
-        if (typeCode.includes("not found")) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `未找到 Schema: "${schemaName}"\n\n可用的 Schemas:\n${Object.keys(project.spec.components?.schemas || {}).join(", ")}`,
-              },
-            ],
-          };
-        }
-
-        return { content: [{ type: "text", text: typeCode }] };
-      } catch (e) {
-        return { content: [{ type: "text", text: `生成类型失败: ${e}` }] };
-      }
     },
   );
 }

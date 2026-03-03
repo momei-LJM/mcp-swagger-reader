@@ -1,46 +1,79 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`parser > generateTypeScriptByEndpoint > should generate snapshot for GET /access/packageUnit/queryList 1`] = `
-"// 请求参数 (/access/packageUnit/queryList GET)
+"// ========== /access/packageUnit/queryList - GET ==========
 export interface TQueryListParams {
   disabled?: boolean; // 
 }
 
-// 响应 (数组)
-export type TQueryListRes = 包装单位[];"
+export interface TQueryListResponse {
+  id?: number; // 代理主键id
+  disabled?: boolean; // 禁用状态
+  createTime?: string; // 新增时间
+  createBy?: string; // 新增人
+  updateTime?: string; // 修改时间
+  updateBy?: string; // 修改人
+  packageUnitCode?: string; // 代码
+  packageUnitNameEn?: string; // 英文名称
+  packageUnitNameCn?: string; // 中文名称
+}"
 `;
 
 exports[`parser > generateTypeScriptByEndpoint > should generate snapshot for GET /access/packageUnit/queryPackageInfo 1`] = `
-"// 请求参数 (/access/packageUnit/queryPackageInfo GET)
+"// ========== /access/packageUnit/queryPackageInfo - GET ==========
 export interface TQueryPackageInfoParams {
   packageCode: string; // 
   packageName: string; // 
 }
 
-// 响应
-export type TQueryPackageInfoRes = 包装单位;"
+export interface TQueryPackageInfoResponse {
+  id?: number; // 代理主键id
+  disabled?: boolean; // 禁用状态
+  createTime?: string; // 新增时间
+  createBy?: string; // 新增人
+  updateTime?: string; // 修改时间
+  updateBy?: string; // 修改人
+  packageUnitCode?: string; // 代码
+  packageUnitNameEn?: string; // 英文名称
+  packageUnitNameCn?: string; // 中文名称
+}"
 `;
 
 exports[`parser > generateTypeScriptByEndpoint > should generate snapshot for POST /access/packageUnit/queryPackageInfos 1`] = `
-"// 请求 Body (数组)
-export type TQueryPackageInfosReq = PackageUnitRequest[];
+"// ========== /access/packageUnit/queryPackageInfos - POST ==========
+export interface TQueryPackageInfosParams {
+  packageNameEn: string; // 英文名称
+  packageCode: string; // 包装单位代码
+}
 
-// 响应 (数组)
-export type TQueryPackageInfosRes = 包装单位[];"
+export interface TQueryPackageInfosResponse {
+  id?: number; // 代理主键id
+  disabled?: boolean; // 禁用状态
+  createTime?: string; // 新增时间
+  createBy?: string; // 新增人
+  updateTime?: string; // 修改时间
+  updateBy?: string; // 修改人
+  packageUnitCode?: string; // 代码
+  packageUnitNameEn?: string; // 英文名称
+  packageUnitNameCn?: string; // 中文名称
+}"
 `;
 
 exports[`parser > generateTypeScriptByEndpoint > should generate snapshot for POST /access/port/validPortDisableStatus 1`] = `
-"// 请求 Body
-export type TValidPortDisableStatusReq = ValidPortStatusRequest;
+"// ========== /access/port/validPortDisableStatus - POST ==========
+export interface TValidPortDisableStatusParams {
+  standardCodes: string[]; // 港口五码code集合
+}
 
-// 响应
-export type TValidPortDisableStatusRes = boolean;"
+export type TValidPortDisableStatusResponse = boolean;"
 `;
 
 exports[`parser > generateTypeScriptByEndpoint > should generate snapshot for PUT /access/resource/update/roleResource 1`] = `
-"// 请求 Body
-export type TRoleResourceReq = UpdateRoleResourceRequest;
+"// ========== /access/resource/update/roleResource - PUT ==========
+export interface TRoleResourceParams {
+  roleId: number; // 角色id
+  resourceIds?: number[]; // 资源id
+}
 
-// 响应
-export type TRoleResourceRes = boolean;"
+export type TRoleResourceResponse = boolean;"
 `;

@@ -71,7 +71,10 @@ export async function generateFullTypeScript(
  * @param schemaName Schema 名称
  * @returns 单个 Schema 的 TypeScript 定义
  */
-export function extractSchemaType(fullTypes: string, schemaName: string): string {
+export function extractSchemaType(
+  fullTypes: string,
+  schemaName: string,
+): string {
   // 匹配 export interface SchemaName { ... } 或 export type SchemaName = ...
   const interfaceRegex = new RegExp(
     `(export\\s+(?:interface|type)\\s+${schemaName}\\s*[{=][\\s\\S]*?)(?=\\n(?:export\\s|\\n\\s*\\n|\\Z))`,
@@ -253,7 +256,11 @@ function parseProperty(
 /**
  * 递归生成 TypeScript 类型
  */
-function generateTsType(schema: any, spec: SwaggerSpec, visited: Set<string> = new Set()): string {
+function generateTsType(
+  schema: any,
+  spec: SwaggerSpec,
+  visited: Set<string> = new Set(),
+): string {
   if (!schema) return "any";
 
   // 处理 $ref 引用
@@ -294,6 +301,198 @@ function generateTsType(schema: any, spec: SwaggerSpec, visited: Set<string> = n
 }
 
 /**
+ * Schema 展开结果类型
+ */
+type ExpandedSchema =
+  | { kind: "object"; content: string }
+  | { kind: "primitive"; content: string }
+  | { kind: "reference"; name: string };
+
+/**
+ * 判断 Schema 是否为对象类型
+ */
+function isObjectSchema(schema: any): boolean {
+  // 有 properties 的是对象
+  if (schema.properties) return true;
+  // 有 $ref 的是引用，需要递归判断
+  if (schema.$ref) return false; // 让调用方处理
+  // 有 allOf/oneOf/anyOf 的是组合类型，视为对象
+  if (schema.allOf || schema.oneOf || schema.anyOf) return true;
+  // 有 type 且不是 object 的是基础类型
+  if (schema.type && schema.type !== "object") return false;
+  // 默认视为对象
+  return true;
+}
+
+/**
+ * 将 Schema 展开为 TypeScript interface 定义
+ */
+function expandSchemaToInterface(
+  schemaName: string,
+  spec: SwaggerSpec,
+  visited: Set<string> = new Set(),
+): ExpandedSchema {
+  const components = spec.components || {};
+  const schemas = components.schemas || {};
+  const schema = schemas[schemaName];
+
+  if (!schema) {
+    return { kind: "reference", name: schemaName };
+  }
+
+  // 防止循环引用
+  if (visited.has(schemaName)) {
+    return { kind: "reference", name: schemaName };
+  }
+  visited.add(schemaName);
+
+  // 如果是基础类型，直接返回
+  if (schema.type && !schema.properties && !schema.allOf && !schema.oneOf && !schema.anyOf) {
+    let tsType = schema.type;
+    if (tsType === "integer") tsType = "number";
+    return { kind: "primitive", content: tsType };
+  }
+
+  // 处理 $ref
+  if (schema.$ref) {
+    const refName = schema.$ref.replace("#/components/schemas/", "");
+    return expandSchemaToInterface(refName, spec, visited);
+  }
+
+  // 处理组合类型 allOf/oneOf/anyOf
+  if (schema.allOf || schema.oneOf || schema.anyOf) {
+    const compositionSchemas = schema.allOf || schema.oneOf || schema.anyOf;
+    const expandedTypes = compositionSchemas.map((s: any) => {
+      if (s.$ref) {
+        const refName = s.$ref.replace("#/components/schemas/", "");
+        return expandSchemaToInterface(refName, spec, new Set(visited));
+      }
+      // 内联 schema 展开
+      return expandInlineSchema(s, spec, visited);
+    });
+
+    const operator = schema.allOf ? " & " : " | ";
+    const content = expandedTypes.map(t => {
+      if (t.kind === "object") return `{ ${t.content} }`;
+      if (t.kind === "reference") return t.name;
+      return t.content;
+    }).join(operator);
+
+    return { kind: "primitive", content };
+  }
+
+  // 展开对象属性
+  const properties = schema.properties || {};
+  const requiredFields = new Set(schema.required || []);
+
+  const propsLines = Object.entries(properties).map(([propName, propValue]: [string, any]) => {
+    const required = requiredFields.has(propName);
+    const optional = required ? "" : "?";
+    const description = propValue.description ? ` // ${propValue.description}` : "";
+
+    // 处理数组类型
+    if (propValue.type === "array" && propValue.items) {
+      if (propValue.items.$ref) {
+        const itemType = propValue.items.$ref.replace("#/components/schemas/", "");
+        const expanded = expandSchemaToInterface(itemType, spec, new Set(visited));
+        const itemContent = expanded.kind === "object" ? `{ ${expanded.content} }` : (expanded.kind === "reference" ? expanded.name : expanded.content);
+        return `  ${propName}${optional}: ${itemContent}[];${description}`;
+      }
+      let itemType = propValue.items.type || "any";
+      if (itemType === "integer") itemType = "number";
+      return `  ${propName}${optional}: ${itemType}[];${description}`;
+    }
+
+    // 处理 $ref
+    if (propValue.$ref) {
+      const refType = propValue.$ref.replace("#/components/schemas/", "");
+      const expanded = expandSchemaToInterface(refType, spec, new Set(visited));
+      const typeContent = expanded.kind === "object" ? `{ ${expanded.content} }` : (expanded.kind === "reference" ? expanded.name : expanded.content);
+      return `  ${propName}${optional}: ${typeContent};${description}`;
+    }
+
+    // 基础类型
+    let tsType = propValue.type || "any";
+    if (tsType === "integer") {
+      tsType = "number";
+    }
+    return `  ${propName}${optional}: ${tsType};${description}`;
+  });
+
+  return { kind: "object", content: propsLines.join("\n") };
+}
+
+/**
+ * 展开内联 Schema（不引用 components.schemas 的内联定义）
+ */
+function expandInlineSchema(
+  schema: any,
+  spec: SwaggerSpec,
+  visited: Set<string>,
+): ExpandedSchema {
+  if (!schema) {
+    return { kind: "primitive", content: "any" };
+  }
+
+  // 处理 $ref
+  if (schema.$ref) {
+    const refName = schema.$ref.replace("#/components/schemas/", "");
+    return expandSchemaToInterface(refName, spec, visited);
+  }
+
+  // 基础类型
+  if (schema.type && !schema.properties && !schema.allOf && !schema.oneOf && !schema.anyOf) {
+    let tsType = schema.type;
+    if (tsType === "integer") tsType = "number";
+    return { kind: "primitive", content: tsType };
+  }
+
+  // 处理组合类型
+  if (schema.allOf || schema.oneOf || schema.anyOf) {
+    const compositionSchemas = schema.allOf || schema.oneOf || schema.anyOf;
+    const expandedTypes = compositionSchemas.map((s: any) => expandInlineSchema(s, spec, visited));
+    const operator = schema.allOf ? " & " : " | ";
+    const content = expandedTypes.map(t => {
+      if (t.kind === "object") return `{ ${t.content} }`;
+      if (t.kind === "reference") return t.name;
+      return t.content;
+    }).join(operator);
+    return { kind: "primitive", content };
+  }
+
+  // 对象属性
+  const properties = schema.properties || {};
+  const requiredFields = new Set(schema.required || []);
+
+  const propsLines = Object.entries(properties).map(([propName, propValue]: [string, any]) => {
+    const required = requiredFields.has(propName);
+    const optional = required ? "" : "?";
+    const description = propValue.description ? ` // ${propValue.description}` : "";
+
+    if (propValue.type === "array" && propValue.items) {
+      if (propValue.items.$ref) {
+        const itemType = propValue.items.$ref.replace("#/components/schemas/", "");
+        return `  ${propName}${optional}: ${itemType}[];${description}`;
+      }
+      let itemType = propValue.items.type || "any";
+      if (itemType === "integer") itemType = "number";
+      return `  ${propName}${optional}: ${itemType}[];${description}`;
+    }
+
+    if (propValue.$ref) {
+      const refType = propValue.$ref.replace("#/components/schemas/", "");
+      return `  ${propName}${optional}: ${refType};${description}`;
+    }
+
+    let tsType = propValue.type || "any";
+    if (tsType === "integer") tsType = "number";
+    return `  ${propName}${optional}: ${tsType};${description}`;
+  });
+
+  return { kind: "object", content: propsLines.join("\n") };
+}
+
+/**
  * 根据接口路径和方法生成 TypeScript 类型
  * @param path API 路径，如 /access/packageUnit/queryList
  * @param method HTTP 方法，如 GET, POST
@@ -301,9 +500,8 @@ function generateTsType(schema: any, spec: SwaggerSpec, visited: Set<string> = n
  * @returns TypeScript 类型代码
  *
  * 命名规范：
- * - 入参(Params): T${name}Params (GET query 参数)
- * - 入参(Req): T${name}Req (POST/PUT/DELETE 请求体)
- * - 响应: T${name}Res
+ * - 请求参数: T${name}Params (GET query 参数 或 POST/PUT 请求体)
+ * - 响应: T${name}Response
  * - name 取接口 url 的最后一段，如 /access/packageUnit/queryList -> queryList
  */
 export function generateTypeScriptByEndpoint(
@@ -326,6 +524,9 @@ export function generateTypeScriptByEndpoint(
   const components = spec.components || {};
   const schemas = components.schemas || {};
 
+  // 接口注释
+  results.push(`// ========== ${path} - ${upperMethod} ==========`);
+
   // 1. 处理请求参数 (parameters - query/path/header)
   const parameters = endpoint.parameters || [];
   if (parameters.length > 0) {
@@ -333,36 +534,51 @@ export function generateTypeScriptByEndpoint(
     const pathParams = parameters.filter((p: any) => p.in === "path");
 
     if (queryParams.length > 0 || pathParams.length > 0) {
-      results.push(`// 请求参数 (${path} ${upperMethod})`);
       results.push(`export interface T${name}Params {`);
       for (const param of parameters) {
         const required = param.required ? "" : "?";
         let paramType = "string";
         if (param.schema?.type) {
-          paramType = param.schema.type === "integer" ? "number" : param.schema.type;
+          paramType =
+            param.schema.type === "integer" ? "number" : param.schema.type;
         }
-        results.push(`  ${param.name}${required}: ${paramType}; // ${param.description || ""}`);
+        results.push(
+          `  ${param.name}${required}: ${paramType}; // ${param.description || ""}`,
+        );
       }
       results.push("}");
       results.push("");
     }
   }
 
-  // 2. 处理请求 Body
+  // 2. 处理请求 Body (POST/PUT/DELETE 请求体，也作为 Params)
   const requestBody = endpoint.requestBody;
-  const bodyContent = requestBody?.content?.["application/json"] || requestBody?.content?.["*/*"];
+  const bodyContent =
+    requestBody?.content?.["application/json"] || requestBody?.content?.["*/*"];
   if (bodyContent?.schema) {
     const bodySchema = bodyContent.schema;
     const refName = bodySchema.$ref?.replace("#/components/schemas/", "");
 
     if (refName && schemas[refName]) {
-      results.push(`// 请求 Body`);
-      results.push(`export type T${name}Req = ${refName};`);
+      const expanded = expandSchemaToInterface(refName, spec);
+      if (expanded.kind === "object") {
+        results.push(`export interface T${name}Params {\n${expanded.content}\n}`);
+      } else {
+        results.push(`export type T${name}Params = ${expanded.kind === "reference" ? expanded.name : expanded.content};`);
+      }
       results.push("");
     } else if (bodySchema.type === "array" && bodySchema.items?.$ref) {
-      const itemRef = bodySchema.items.$ref.replace("#/components/schemas/", "");
-      results.push(`// 请求 Body (数组)`);
-      results.push(`export type T${name}Req = ${itemRef}[];`);
+      const itemRef = bodySchema.items.$ref.replace(
+        "#/components/schemas/",
+        "",
+      );
+      const expanded = expandSchemaToInterface(itemRef, spec);
+      if (expanded.kind === "object") {
+        results.push(`export interface T${name}Params {\n${expanded.content}\n}`);
+      } else {
+        const itemType = expanded.kind === "reference" ? expanded.name : expanded.content;
+        results.push(`export type T${name}Params = ${itemType}[];`);
+      }
       results.push("");
     }
   }
@@ -370,21 +586,34 @@ export function generateTypeScriptByEndpoint(
   // 3. 处理响应
   const responses = endpoint.responses || {};
   const successResponse = responses["200"] || responses["201"];
-  const respContent = successResponse?.content?.["application/json"] || successResponse?.content?.["*/*"];
+  const respContent =
+    successResponse?.content?.["application/json"] ||
+    successResponse?.content?.["*/*"];
   if (respContent?.schema) {
     const respSchema = respContent.schema;
     const refName = respSchema.$ref?.replace("#/components/schemas/", "");
 
     if (refName && schemas[refName]) {
-      results.push(`// 响应`);
-      results.push(`export type T${name}Res = ${refName};`);
+      const expanded = expandSchemaToInterface(refName, spec);
+      if (expanded.kind === "object") {
+        results.push(`export interface T${name}Response {\n${expanded.content}\n}`);
+      } else {
+        results.push(`export type T${name}Response = ${expanded.kind === "reference" ? expanded.name : expanded.content};`);
+      }
     } else if (respSchema.type === "array" && respSchema.items?.$ref) {
-      const itemRef = respSchema.items.$ref.replace("#/components/schemas/", "");
-      results.push(`// 响应 (数组)`);
-      results.push(`export type T${name}Res = ${itemRef}[];`);
+      const itemRef = respSchema.items.$ref.replace(
+        "#/components/schemas/",
+        "",
+      );
+      const expanded = expandSchemaToInterface(itemRef, spec);
+      if (expanded.kind === "object") {
+        results.push(`export interface T${name}Response {\n${expanded.content}\n}`);
+      } else {
+        const itemType = expanded.kind === "reference" ? expanded.name : expanded.content;
+        results.push(`export type T${name}Response = ${itemType}[];`);
+      }
     } else if (respSchema.type) {
-      results.push(`// 响应`);
-      results.push(`export type T${name}Res = ${respSchema.type};`);
+      results.push(`export type T${name}Response = ${respSchema.type};`);
     }
   }
 

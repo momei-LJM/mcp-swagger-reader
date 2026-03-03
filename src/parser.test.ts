@@ -9,6 +9,147 @@ import { readFileSync } from "fs";
 
 const mockSpec = JSON.parse(readFileSync("./mock.json", "utf-8"));
 
+// 测试用的 mock spec，包含复杂场景
+const complexMockSpec = {
+  openapi: "3.0.0",
+  info: { title: "Test API", version: "1.0.0" },
+  paths: {
+    "/test/nested-ref": {
+      get: {
+        parameters: [
+          {
+            name: "id",
+            in: "query",
+            required: true,
+            schema: { type: "integer" },
+            description: "用户ID",
+          },
+        ],
+        responses: {
+          200: {
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/用户详情",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/test/combined": {
+      post: {
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/组合类型",
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            content: {
+              "application/json": {
+                schema: {
+                  type: "array",
+                  items: {
+                    $ref: "#/components/schemas/用户信息",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      用户: {
+        type: "object",
+        properties: {
+          id: { type: "integer", description: "用户ID" },
+          name: { type: "string", description: "用户名称" },
+        },
+        required: ["id", "name"],
+      },
+      用户详情: {
+        type: "object",
+        properties: {
+          user: {
+            $ref: "#/components/schemas/用户",
+          },
+          profile: {
+            $ref: "#/components/schemas/用户Profile",
+          },
+        },
+      },
+      用户Profile: {
+        type: "object",
+        properties: {
+          bio: { type: "string", description: "个人简介" },
+          avatar: { type: "string", description: "头像URL" },
+        },
+      },
+      基础信息: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          name: { type: "string" },
+        },
+      },
+      扩展信息: {
+        type: "object",
+        properties: {
+          email: { type: "string" },
+          phone: { type: "string" },
+        },
+      },
+      组合类型: {
+        allOf: [
+          { $ref: "#/components/schemas/基础信息" },
+          { $ref: "#/components/schemas/扩展信息" },
+        ],
+      },
+      可选组合: {
+        oneOf: [
+          { $ref: "#/components/schemas/用户" },
+          { $ref: "#/components/schemas/用户Profile" },
+        ],
+      },
+      混合组合: {
+        anyOf: [
+          { $ref: "#/components/schemas/基础信息" },
+          { type: "string" },
+        ],
+      },
+      用户信息: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          username: { type: "string" },
+          tags: {
+            type: "array",
+            items: {
+              $ref: "#/components/schemas/标签",
+            },
+          },
+        },
+      },
+      标签: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          name: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
 describe("parser", () => {
   describe("extractEndpoints", () => {
     it("should extract all endpoints from swagger spec", () => {
@@ -54,8 +195,9 @@ describe("parser", () => {
 
     it("should generate TypeScript for POST endpoint with request body", () => {
       const code = generateTypeScriptByEndpoint("/access/packageUnit/queryPackageInfos", "POST", mockSpec);
-      expect(code).toContain("TQueryPackageInfosReq");
-      expect(code).toContain("PackageUnitRequest");
+      expect(code).toContain("TQueryPackageInfosParams");
+      expect(code).toContain("packageNameEn");
+      expect(code).toContain("packageCode");
     });
 
     it("should generate TypeScript for response", () => {
@@ -93,6 +235,26 @@ describe("parser", () => {
     it("should generate snapshot for POST /access/port/validPortDisableStatus", () => {
       const code = generateTypeScriptByEndpoint("/access/port/validPortDisableStatus", "POST", mockSpec);
       expect(code).toMatchSnapshot();
+    });
+  });
+
+  describe("generateTypeScriptByEndpoint - 复杂场景", () => {
+    it("should handle nested $ref", () => {
+      const code = generateTypeScriptByEndpoint("/test/nested-ref", "GET", complexMockSpec);
+      expect(code).toContain("TNested-refParams");
+      expect(code).toContain("id");
+    });
+
+    it("should handle array response with $ref items", () => {
+      const code = generateTypeScriptByEndpoint("/test/combined", "POST", complexMockSpec);
+      expect(code).toContain("TCombinedResponse");
+    });
+
+    it("should expand nested properties", () => {
+      const code = generateTypeScriptByEndpoint("/test/nested-ref", "GET", complexMockSpec);
+      // 响应应该展开用户详情中的嵌套属性
+      expect(code).toContain("user");
+      expect(code).toContain("profile");
     });
   });
 });
