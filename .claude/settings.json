@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "mcp-swagger-reader": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/momei/code/my_project/mcp-swagger-reader/dist/index.mjs"
+      ],
+      "env": {
+        "SWAGGER_PROJECTS": "[{\"name\":\"my-api\",\"swaggerUrl\":\"https://dev-apisix.hgj.com/booking-common-resources/v3/api-docs/Access%E9%89%B4%E6%9D%83\"}]"
+      }
+    }
+  }
+}

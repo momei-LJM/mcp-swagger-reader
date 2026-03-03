@@ -1,0 +1,46 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`parser > generateTypeScriptByEndpoint > should generate snapshot for GET /access/packageUnit/queryList 1`] = `
+"// 请求参数 (/access/packageUnit/queryList GET)
+export interface TQueryListParams {
+  disabled?: boolean; // 
+}
+
+// 响应 (数组)
+export type TQueryListRes = 包装单位[];"
+`;
+
+exports[`parser > generateTypeScriptByEndpoint > should generate snapshot for GET /access/packageUnit/queryPackageInfo 1`] = `
+"// 请求参数 (/access/packageUnit/queryPackageInfo GET)
+export interface TQueryPackageInfoParams {
+  packageCode: string; // 
+  packageName: string; // 
+}
+
+// 响应
+export type TQueryPackageInfoRes = 包装单位;"
+`;
+
+exports[`parser > generateTypeScriptByEndpoint > should generate snapshot for POST /access/packageUnit/queryPackageInfos 1`] = `
+"// 请求 Body (数组)
+export type TQueryPackageInfosReq = PackageUnitRequest[];
+
+// 响应 (数组)
+export type TQueryPackageInfosRes = 包装单位[];"
+`;
+
+exports[`parser > generateTypeScriptByEndpoint > should generate snapshot for POST /access/port/validPortDisableStatus 1`] = `
+"// 请求 Body
+export type TValidPortDisableStatusReq = ValidPortStatusRequest;
+
+// 响应
+export type TValidPortDisableStatusRes = boolean;"
+`;
+
+exports[`parser > generateTypeScriptByEndpoint > should generate snapshot for PUT /access/resource/update/roleResource 1`] = `
+"// 请求 Body
+export type TRoleResourceReq = UpdateRoleResourceRequest;
+
+// 响应
+export type TRoleResourceRes = boolean;"
+`;

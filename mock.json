@@ -1,0 +1,307 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "OpenAPI definition",
+    "version": "v0"
+  },
+  "servers": [
+    {
+      "url": "http://dev-apisix.hgj.com",
+      "description": "Generated server url"
+    }
+  ],
+  "paths": {
+    "/access/packageUnit/queryPackageInfos": {
+      "post": {
+        "tags": [
+          "access鉴权-包装单位维护"
+        ],
+        "summary": "包装单位维护 - 根据多个code和name查询信息",
+        "description": "ljm",
+        "operationId": "queryPackageInfos",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PackageUnitRequest"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/包装单位"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/access/packageUnit/queryPackageInfo": {
+      "get": {
+        "tags": [
+          "access鉴权-包装单位维护"
+        ],
+        "summary": "包装单位维护 - 根据code和name查询信息",
+        "description": "ljm",
+        "operationId": "queryPackageInfo",
+        "parameters": [
+          {
+            "name": "packageCode",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "packageName",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/包装单位"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/access/packageUnit/queryList": {
+      "get": {
+        "tags": [
+          "access鉴权-包装单位维护"
+        ],
+        "summary": "包装单位维护 -根据禁启用状态查询列表（非必填）",
+        "description": "凯子",
+        "operationId": "queryList",
+        "parameters": [
+          {
+            "name": "disabled",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/包装单位"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/access/resource/update/roleResource": {
+      "put": {
+        "tags": [
+          "access鉴权-客户端权限资源"
+        ],
+        "summary": "修改角色下对应的权限",
+        "description": "joshxu.xu",
+        "operationId": "updateRoleResource",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRoleResourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/access/port/validPortDisableStatus": {
+      "post": {
+        "tags": [
+          "access鉴权-五码港口"
+        ],
+        "summary": "五码港口 -验证港口信息是否禁用",
+        "description": "凯子",
+        "operationId": "validPortDisableStatus",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidPortStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "包装单位": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "代理主键id",
+            "format": "int32",
+            "example": 1
+          },
+          "disabled": {
+            "type": "boolean",
+            "description": "禁用状态",
+            "example": true
+          },
+          "createTime": {
+            "type": "string",
+            "description": "新增时间",
+            "format": "date-time"
+          },
+          "createBy": {
+            "type": "string",
+            "description": "新增人"
+          },
+          "updateTime": {
+            "type": "string",
+            "description": "修改时间",
+            "format": "date-time"
+          },
+          "updateBy": {
+            "type": "string",
+            "description": "修改人"
+          },
+          "packageUnitCode": {
+            "type": "string",
+            "description": "代码",
+            "example": "BALE"
+          },
+          "packageUnitNameEn": {
+            "type": "string",
+            "description": "英文名称",
+            "example": "BALE"
+          },
+          "packageUnitNameCn": {
+            "type": "string",
+            "description": "中文名称",
+            "example": "包"
+          }
+        }
+      },
+      "PackageUnitRequest": {
+        "required": [
+          "packageCode",
+          "packageNameEn"
+        ],
+        "type": "object",
+        "properties": {
+          "packageNameEn": {
+            "type": "string",
+            "description": "英文名称",
+            "example": "WOODEN CASE"
+          },
+          "packageCode": {
+            "type": "string",
+            "description": "包装单位代码",
+            "example": "WC"
+          }
+        },
+        "description": "包装单位查询请求体"
+      },
+      "UpdateRoleResourceRequest": {
+        "required": [
+          "roleId"
+        ],
+        "type": "object",
+        "properties": {
+          "roleId": {
+            "type": "integer",
+            "description": "角色id",
+            "format": "int64"
+          },
+          "resourceIds": {
+            "uniqueItems": true,
+            "type": "array",
+            "description": "资源id",
+            "items": {
+              "type": "integer",
+              "description": "资源id",
+              "format": "int64"
+            }
+          }
+        },
+        "description": "修改角色对应资源的请求头"
+      },
+      "ValidPortStatusRequest": {
+        "required": [
+          "standardCodes"
+        ],
+        "type": "object",
+        "properties": {
+          "standardCodes": {
+            "uniqueItems": true,
+            "type": "array",
+            "description": "港口五码code集合",
+            "items": {
+              "type": "string",
+              "description": "港口五码code集合"
+            }
+          }
+        },
+        "description": "验证港口状态"
+      }
+    }
+  }
+}
