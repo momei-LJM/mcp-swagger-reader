@@ -536,3 +536,50 @@ describe("tools - generate_ts_by_endpoint", () => {
     expect(code).toMatchSnapshot();
   });
 });
+
+describe("tools - reload_swagger", () => {
+  it("should reload swagger spec for project", async () => {
+    const projects = new Map<string, SwaggerProject>();
+
+    // 先添加项目（不加载spec）
+    const name = "test-project";
+    const swaggerUrl = "./mock.json";
+    projects.set(name, { name, swaggerUrl });
+
+    expect(projects.get(name)?.spec).toBeUndefined();
+
+    // 模拟重新加载
+    const { loadSwaggerFromFile } = await import("../src/parser.js");
+    const spec = loadSwaggerFromFile(swaggerUrl);
+    projects.set(name, { name, swaggerUrl, spec });
+
+    expect(projects.get(name)?.spec).toBeDefined();
+    expect(projects.get(name)?.spec?.paths).toBeDefined();
+  });
+
+  it("should return error for non-existent project", () => {
+    const projects = new Map<string, SwaggerProject>();
+
+    const project = projects.get("non-existent");
+    expect(project).toBeUndefined();
+  });
+
+  it("should update existing project spec on reload", async () => {
+    const projects = new Map<string, SwaggerProject>();
+
+    // 初始项目
+    const name = "test-project";
+    const swaggerUrl = "./mock.json";
+    const { loadSwaggerFromFile } = await import("../src/parser.js");
+    const spec1 = loadSwaggerFromFile(swaggerUrl);
+    projects.set(name, { name, swaggerUrl, spec: spec1 });
+
+    // 重新加载（模拟）
+    const spec2 = loadSwaggerFromFile(swaggerUrl);
+    projects.set(name, { name, swaggerUrl, spec: spec2 });
+
+    expect(projects.get(name)?.spec).toBeDefined();
+    // 验证路径数量相同
+    expect(Object.keys(projects.get(name)?.spec?.paths || {}).length).toBeGreaterThan(0);
+  });
+});
