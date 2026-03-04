@@ -58,7 +58,10 @@ export async function generateFullTypeScript(
     // 创建临时文件来存储规范（openapi-typescript 需要文件路径或 URL）
     // 使用用户目录下的临时目录，避免污染项目目录
     const tempDir = getTempDir();
-    const tempFile = join(tempDir, `${projectKey.replace(/[^a-z0-9]/gi, "_")}_spec.json`);
+    const tempFile = join(
+      tempDir,
+      `${projectKey.replace(/[^a-z0-9]/gi, "_")}_spec.json`,
+    );
     writeFileSync(tempFile, JSON.stringify(spec));
 
     // 使用 openapi-typescript 生成类型
@@ -336,11 +339,15 @@ function isObjectSchema(schema: any): boolean {
 
 /**
  * 将 Schema 展开为 TypeScript interface 定义
+ * @param maxDepth 最大递归深度，超过后使用引用名称
+ * @param deferredSchemas 收集超出深度的被引用 schema 名称，后续单独输出
  */
 function expandSchemaToInterface(
   schemaName: string,
   spec: SwaggerSpec,
   visited: Set<string> = new Set(),
+  maxDepth: number = 5,
+  deferredSchemas?: Set<string>,
 ): ExpandedSchema {
   const components = spec.components || {};
   const schemas = components.schemas || {};
@@ -354,10 +361,25 @@ function expandSchemaToInterface(
   if (visited.has(schemaName)) {
     return { kind: "reference", name: schemaName };
   }
+
+  // 超过深度限制，使用引用名称并收集到 deferred 列表
+  if (maxDepth <= 0) {
+    if (deferredSchemas) {
+      deferredSchemas.add(schemaName);
+    }
+    return { kind: "reference", name: schemaName };
+  }
+
   visited.add(schemaName);
 
   // 如果是基础类型，直接返回
-  if (schema.type && !schema.properties && !schema.allOf && !schema.oneOf && !schema.anyOf) {
+  if (
+    schema.type &&
+    !schema.properties &&
+    !schema.allOf &&
+    !schema.oneOf &&
+    !schema.anyOf
+  ) {
     let tsType = schema.type;
     if (tsType === "integer") tsType = "number";
     return { kind: "primitive", content: tsType };
@@ -366,7 +388,13 @@ function expandSchemaToInterface(
   // 处理 $ref
   if (schema.$ref) {
     const refName = schema.$ref.replace("#/components/schemas/", "");
-    return expandSchemaToInterface(refName, spec, visited);
+    return expandSchemaToInterface(
+      refName,
+      spec,
+      visited,
+      maxDepth - 1,
+      deferredSchemas,
+    );
   }
 
   // 处理组合类型 allOf/oneOf/anyOf
@@ -375,18 +403,32 @@ function expandSchemaToInterface(
     const expandedTypes = compositionSchemas.map((s: any) => {
       if (s.$ref) {
         const refName = s.$ref.replace("#/components/schemas/", "");
-        return expandSchemaToInterface(refName, spec, new Set(visited));
+        return expandSchemaToInterface(
+          refName,
+          spec,
+          new Set(visited),
+          maxDepth - 1,
+          deferredSchemas,
+        );
       }
       // 内联 schema 展开
-      return expandInlineSchema(s, spec, visited);
+      return expandInlineSchema(
+        s,
+        spec,
+        visited,
+        maxDepth - 1,
+        deferredSchemas,
+      );
     });
 
     const operator = schema.allOf ? " & " : " | ";
-    const content = expandedTypes.map(t => {
-      if (t.kind === "object") return `{ ${t.content} }`;
-      if (t.kind === "reference") return t.name;
-      return t.content;
-    }).join(operator);
+    const content = expandedTypes
+      .map((t) => {
+        if (t.kind === "object") return `{ ${t.content} }`;
+        if (t.kind === "reference") return t.name;
+        return t.content;
+      })
+      .join(operator);
 
     return { kind: "primitive", content };
   }
@@ -395,39 +437,68 @@ function expandSchemaToInterface(
   const properties = schema.properties || {};
   const requiredFields = new Set(schema.required || []);
 
-  const propsLines = Object.entries(properties).map(([propName, propValue]: [string, any]) => {
-    const required = requiredFields.has(propName);
-    const optional = required ? "" : "?";
-    const description = propValue.description ? ` // ${propValue.description}` : "";
+  const propsLines = Object.entries(properties).map(
+    ([propName, propValue]: [string, any]) => {
+      const required = requiredFields.has(propName);
+      const optional = required ? "" : "?";
+      const description = propValue.description
+        ? ` // ${propValue.description}`
+        : "";
 
-    // 处理数组类型
-    if (propValue.type === "array" && propValue.items) {
-      if (propValue.items.$ref) {
-        const itemType = propValue.items.$ref.replace("#/components/schemas/", "");
-        const expanded = expandSchemaToInterface(itemType, spec, new Set(visited));
-        const itemContent = expanded.kind === "object" ? `{ ${expanded.content} }` : (expanded.kind === "reference" ? expanded.name : expanded.content);
-        return `  ${propName}${optional}: ${itemContent}[];${description}`;
+      // 处理数组类型
+      if (propValue.type === "array" && propValue.items) {
+        if (propValue.items.$ref) {
+          const itemType = propValue.items.$ref.replace(
+            "#/components/schemas/",
+            "",
+          );
+          const expanded = expandSchemaToInterface(
+            itemType,
+            spec,
+            new Set(visited),
+            maxDepth - 1,
+            deferredSchemas,
+          );
+          const itemContent =
+            expanded.kind === "object"
+              ? `{ ${expanded.content} }`
+              : expanded.kind === "reference"
+                ? expanded.name
+                : expanded.content;
+          return `  ${propName}${optional}: ${itemContent}[];${description}`;
+        }
+        let itemType = propValue.items.type || "any";
+        if (itemType === "integer") itemType = "number";
+        return `  ${propName}${optional}: ${itemType}[];${description}`;
       }
-      let itemType = propValue.items.type || "any";
-      if (itemType === "integer") itemType = "number";
-      return `  ${propName}${optional}: ${itemType}[];${description}`;
-    }
 
-    // 处理 $ref
-    if (propValue.$ref) {
-      const refType = propValue.$ref.replace("#/components/schemas/", "");
-      const expanded = expandSchemaToInterface(refType, spec, new Set(visited));
-      const typeContent = expanded.kind === "object" ? `{ ${expanded.content} }` : (expanded.kind === "reference" ? expanded.name : expanded.content);
-      return `  ${propName}${optional}: ${typeContent};${description}`;
-    }
+      // 处理 $ref
+      if (propValue.$ref) {
+        const refType = propValue.$ref.replace("#/components/schemas/", "");
+        const expanded = expandSchemaToInterface(
+          refType,
+          spec,
+          new Set(visited),
+          maxDepth - 1,
+          deferredSchemas,
+        );
+        const typeContent =
+          expanded.kind === "object"
+            ? `{ ${expanded.content} }`
+            : expanded.kind === "reference"
+              ? expanded.name
+              : expanded.content;
+        return `  ${propName}${optional}: ${typeContent};${description}`;
+      }
 
-    // 基础类型
-    let tsType = propValue.type || "any";
-    if (tsType === "integer") {
-      tsType = "number";
-    }
-    return `  ${propName}${optional}: ${tsType};${description}`;
-  });
+      // 基础类型
+      let tsType = propValue.type || "any";
+      if (tsType === "integer") {
+        tsType = "number";
+      }
+      return `  ${propName}${optional}: ${tsType};${description}`;
+    },
+  );
 
   return { kind: "object", content: propsLines.join("\n") };
 }
@@ -439,6 +510,8 @@ function expandInlineSchema(
   schema: any,
   spec: SwaggerSpec,
   visited: Set<string>,
+  maxDepth: number = 5,
+  deferredSchemas?: Set<string>,
 ): ExpandedSchema {
   if (!schema) {
     return { kind: "primitive", content: "any" };
@@ -447,11 +520,23 @@ function expandInlineSchema(
   // 处理 $ref
   if (schema.$ref) {
     const refName = schema.$ref.replace("#/components/schemas/", "");
-    return expandSchemaToInterface(refName, spec, visited);
+    return expandSchemaToInterface(
+      refName,
+      spec,
+      visited,
+      maxDepth - 1,
+      deferredSchemas,
+    );
   }
 
   // 基础类型
-  if (schema.type && !schema.properties && !schema.allOf && !schema.oneOf && !schema.anyOf) {
+  if (
+    schema.type &&
+    !schema.properties &&
+    !schema.allOf &&
+    !schema.oneOf &&
+    !schema.anyOf
+  ) {
     let tsType = schema.type;
     if (tsType === "integer") tsType = "number";
     return { kind: "primitive", content: tsType };
@@ -460,13 +545,17 @@ function expandInlineSchema(
   // 处理组合类型
   if (schema.allOf || schema.oneOf || schema.anyOf) {
     const compositionSchemas = schema.allOf || schema.oneOf || schema.anyOf;
-    const expandedTypes = compositionSchemas.map((s: any) => expandInlineSchema(s, spec, visited));
+    const expandedTypes = compositionSchemas.map((s: any) =>
+      expandInlineSchema(s, spec, visited, maxDepth - 1, deferredSchemas),
+    );
     const operator = schema.allOf ? " & " : " | ";
-    const content = expandedTypes.map(t => {
-      if (t.kind === "object") return `{ ${t.content} }`;
-      if (t.kind === "reference") return t.name;
-      return t.content;
-    }).join(operator);
+    const content = expandedTypes
+      .map((t) => {
+        if (t.kind === "object") return `{ ${t.content} }`;
+        if (t.kind === "reference") return t.name;
+        return t.content;
+      })
+      .join(operator);
     return { kind: "primitive", content };
   }
 
@@ -474,30 +563,37 @@ function expandInlineSchema(
   const properties = schema.properties || {};
   const requiredFields = new Set(schema.required || []);
 
-  const propsLines = Object.entries(properties).map(([propName, propValue]: [string, any]) => {
-    const required = requiredFields.has(propName);
-    const optional = required ? "" : "?";
-    const description = propValue.description ? ` // ${propValue.description}` : "";
+  const propsLines = Object.entries(properties).map(
+    ([propName, propValue]: [string, any]) => {
+      const required = requiredFields.has(propName);
+      const optional = required ? "" : "?";
+      const description = propValue.description
+        ? ` // ${propValue.description}`
+        : "";
 
-    if (propValue.type === "array" && propValue.items) {
-      if (propValue.items.$ref) {
-        const itemType = propValue.items.$ref.replace("#/components/schemas/", "");
+      if (propValue.type === "array" && propValue.items) {
+        if (propValue.items.$ref) {
+          const itemType = propValue.items.$ref.replace(
+            "#/components/schemas/",
+            "",
+          );
+          return `  ${propName}${optional}: ${itemType}[];${description}`;
+        }
+        let itemType = propValue.items.type || "any";
+        if (itemType === "integer") itemType = "number";
         return `  ${propName}${optional}: ${itemType}[];${description}`;
       }
-      let itemType = propValue.items.type || "any";
-      if (itemType === "integer") itemType = "number";
-      return `  ${propName}${optional}: ${itemType}[];${description}`;
-    }
 
-    if (propValue.$ref) {
-      const refType = propValue.$ref.replace("#/components/schemas/", "");
-      return `  ${propName}${optional}: ${refType};${description}`;
-    }
+      if (propValue.$ref) {
+        const refType = propValue.$ref.replace("#/components/schemas/", "");
+        return `  ${propName}${optional}: ${refType};${description}`;
+      }
 
-    let tsType = propValue.type || "any";
-    if (tsType === "integer") tsType = "number";
-    return `  ${propName}${optional}: ${tsType};${description}`;
-  });
+      let tsType = propValue.type || "any";
+      if (tsType === "integer") tsType = "number";
+      return `  ${propName}${optional}: ${tsType};${description}`;
+    },
+  );
 
   return { kind: "object", content: propsLines.join("\n") };
 }
@@ -533,6 +629,9 @@ export function generateTypeScriptByEndpoint(
   const results: string[] = [];
   const components = spec.components || {};
   const schemas = components.schemas || {};
+
+  // 收集超出深度限制的被引用 schema，后续单独输出
+  const deferredSchemas = new Set<string>();
 
   // 接口注释
   results.push(`// ========== ${path} - ${upperMethod} ==========`);
@@ -570,11 +669,21 @@ export function generateTypeScriptByEndpoint(
     const refName = bodySchema.$ref?.replace("#/components/schemas/", "");
 
     if (refName && schemas[refName]) {
-      const expanded = expandSchemaToInterface(refName, spec);
+      const expanded = expandSchemaToInterface(
+        refName,
+        spec,
+        new Set(),
+        5,
+        deferredSchemas,
+      );
       if (expanded.kind === "object") {
-        results.push(`export interface T${name}Params {\n${expanded.content}\n}`);
+        results.push(
+          `export interface T${name}Params {\n${expanded.content}\n}`,
+        );
       } else {
-        results.push(`export type T${name}Params = ${expanded.kind === "reference" ? expanded.name : expanded.content};`);
+        results.push(
+          `export type T${name}Params = ${expanded.kind === "reference" ? expanded.name : expanded.content};`,
+        );
       }
       results.push("");
     } else if (bodySchema.type === "array" && bodySchema.items?.$ref) {
@@ -582,11 +691,20 @@ export function generateTypeScriptByEndpoint(
         "#/components/schemas/",
         "",
       );
-      const expanded = expandSchemaToInterface(itemRef, spec);
+      const expanded = expandSchemaToInterface(
+        itemRef,
+        spec,
+        new Set(),
+        5,
+        deferredSchemas,
+      );
       if (expanded.kind === "object") {
-        results.push(`export interface T${name}Params {\n${expanded.content}\n}`);
+        results.push(
+          `export interface T${name}Params {\n${expanded.content}\n}`,
+        );
       } else {
-        const itemType = expanded.kind === "reference" ? expanded.name : expanded.content;
+        const itemType =
+          expanded.kind === "reference" ? expanded.name : expanded.content;
         results.push(`export type T${name}Params = ${itemType}[];`);
       }
       results.push("");
@@ -604,26 +722,65 @@ export function generateTypeScriptByEndpoint(
     const refName = respSchema.$ref?.replace("#/components/schemas/", "");
 
     if (refName && schemas[refName]) {
-      const expanded = expandSchemaToInterface(refName, spec);
+      const expanded = expandSchemaToInterface(
+        refName,
+        spec,
+        new Set(),
+        3,
+        deferredSchemas,
+      );
       if (expanded.kind === "object") {
-        results.push(`export interface T${name}Response {\n${expanded.content}\n}`);
+        results.push(
+          `export interface T${name}Response {\n${expanded.content}\n}`,
+        );
       } else {
-        results.push(`export type T${name}Response = ${expanded.kind === "reference" ? expanded.name : expanded.content};`);
+        results.push(
+          `export type T${name}Response = ${expanded.kind === "reference" ? expanded.name : expanded.content};`,
+        );
       }
     } else if (respSchema.type === "array" && respSchema.items?.$ref) {
       const itemRef = respSchema.items.$ref.replace(
         "#/components/schemas/",
         "",
       );
-      const expanded = expandSchemaToInterface(itemRef, spec);
+      const expanded = expandSchemaToInterface(
+        itemRef,
+        spec,
+        new Set(),
+        3,
+        deferredSchemas,
+      );
       if (expanded.kind === "object") {
-        results.push(`export interface T${name}Response {\n${expanded.content}\n}`);
+        results.push(
+          `export interface T${name}Response {\n${expanded.content}\n}`,
+        );
       } else {
-        const itemType = expanded.kind === "reference" ? expanded.name : expanded.content;
+        const itemType =
+          expanded.kind === "reference" ? expanded.name : expanded.content;
         results.push(`export type T${name}Response = ${itemType}[];`);
       }
     } else if (respSchema.type) {
       results.push(`export type T${name}Response = ${respSchema.type};`);
+    }
+  }
+
+  // 4. 输出超出深度限制的被引用 schema 定义
+  if (deferredSchemas.size > 0) {
+    results.push("");
+    results.push("// ========== 引用的类型定义 ==========");
+    for (const schemaName of deferredSchemas) {
+      const schema = schemas[schemaName];
+      if (!schema) continue;
+
+      // 对 deferred schema 展开 1 层（不再递归）
+      const expanded = expandSchemaToInterface(schemaName, spec, new Set(), 1);
+      if (expanded.kind === "object") {
+        results.push(
+          `export interface ${schemaName} {\n${expanded.content}\n}`,
+        );
+      } else if (expanded.kind === "primitive") {
+        results.push(`export type ${schemaName} = ${expanded.content};`);
+      }
     }
   }
 

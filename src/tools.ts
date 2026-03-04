@@ -9,8 +9,6 @@ import {
   extractEndpoints,
   extractSchemas,
   generateTypeScriptByEndpoint,
-  generateFullTypeScript,
-  extractSchemaType,
 } from "./parser.js";
 
 async function ensureProjectSpecLoaded(
@@ -350,97 +348,10 @@ export function registerTools(
         projects.set(projectName, project);
       }
 
-      // 使用 openapi-typescript 生成全量类型
-      const fullTypes = await generateFullTypeScript(project.spec, projectName);
-
-      // 从全量类型中提取接口相关的类型
-      const endpoints = extractEndpoints(project.spec);
-      const endpoint = endpoints.find(
-        (ep) =>
-          ep.path === path && ep.method.toLowerCase() === method.toLowerCase(),
-      );
-
-      if (!endpoint) {
-        return {
-          content: [{ type: "text", text: `未找到接口: ${method} ${path}` }],
-        };
-      }
-
-      // 提取相关 Schema 类型
-      const results: string[] = [];
-      const components = project.spec.components || {};
-      const schemas = components.schemas || {};
-
-      // 收集请求和响应中引用的 Schema
-      const usedSchemas = new Set<string>();
-
-      // 从 requestBody 收集
-      if (endpoint.requestBody) {
-        const bodyContent = endpoint.requestBody.content?.["application/json"];
-        if (bodyContent?.schema?.$ref) {
-          usedSchemas.add(
-            bodyContent.schema.$ref.replace("#/components/schemas/", ""),
-          );
-        }
-      }
-
-      // 从 responses 收集
-      for (const resp of endpoint.responses) {
-        // 这里可以进一步解析响应中的 schema
-      }
-
-      // 收集 parameters 中的引用
-      for (const param of endpoint.parameters) {
-        // 参数类型通常比较简单，不一定需要提取复杂类型
-      }
-
-      // 生成代码：先输出接口信息，然后输出相关类型
-      const pathName = path.split("/").filter(Boolean).pop() || "unknown";
-      const name = pathName.charAt(0).toUpperCase() + pathName.slice(1);
-
-      results.push(`// 接口: ${method} ${path}`);
-      results.push(`// ${endpoint.summary || endpoint.description || ""}`);
-      results.push("");
-
-      // 尝试从全量类型中提取
-      if (fullTypes.startsWith("// Error")) {
-        // 如果 openapi-typescript 失败，回退到旧方法
-        const code = generateTypeScriptByEndpoint(path, method, project.spec);
-        return {
-          content: [{ type: "text", text: code }],
-        };
-      }
-
-      // 从全量类型中提取需要的部分
-      const extracted = extractSchemaType(fullTypes, name);
-      if (extracted && !extracted.includes("not found")) {
-        results.push(extracted);
-      } else {
-        // 如果没找到专门的类型，使用 generateTypeScriptByEndpoint 展开 Schema
-        const expandedCode = generateTypeScriptByEndpoint(
-          path,
-          method,
-          project.spec,
-        );
-        if (
-          expandedCode &&
-          !expandedCode.includes("未找到") &&
-          !expandedCode.includes("无需生成")
-        ) {
-          results.push(expandedCode);
-        } else {
-          results.push(`// 未能自动生成类型，请参考项目全量类型`);
-        }
-      }
-
-      const finalResult = results.join("\n");
+      // 直接使用精准的单接口类型生成，避免全量类型生成导致响应过大
+      const code = generateTypeScriptByEndpoint(path, method, project.spec);
       return {
-        content: [
-          {
-            type: "text",
-            text: finalResult || `// 无类型信息可用`,
-          },
-        ],
+        content: [{ type: "text", text: code }],
       };
     },
   );

@@ -1,6 +1,6 @@
 {
   "name": "mcp-swagger-reader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP tool to read and parse Swagger/OpenAPI specifications",
   "main": "dist/index.mjs",
   "type": "module",
