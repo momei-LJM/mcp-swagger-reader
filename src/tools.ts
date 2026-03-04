@@ -13,10 +13,35 @@ import {
   extractSchemaType,
 } from "./parser.js";
 
+async function ensureProjectSpecLoaded(
+  projectName: string,
+  project?: SwaggerProject,
+): Promise<{ project?: SwaggerProject; error?: string }> {
+  if (!project) {
+    return {
+      error: `项目 "${projectName}" 未找到，请先使用 add_swagger_project 添加`,
+    };
+  }
+
+  if (project.spec) {
+    return { project };
+  }
+
+  try {
+    const spec =
+      project.swaggerUrl.startsWith("http://") ||
+      project.swaggerUrl.startsWith("https://")
+        ? await loadSwaggerFromUrl(project.swaggerUrl)
+        : loadSwaggerFromFile(project.swaggerUrl);
+    return { project: { ...project, spec } };
+  } catch (e) {
+    return { error: `加载Swagger规范失败: ${e}` };
+  }
+}
+
 export function registerTools(
   mcp: McpServer,
   projects: Map<string, SwaggerProject>,
-  saveProjects?: () => void,
 ) {
   // 工具：添加项目Swagger配置
   mcp.registerTool(
@@ -31,21 +56,9 @@ export function registerTools(
       }),
     },
     async ({ name, swaggerUrl }: { name: string; swaggerUrl: string }) => {
-      projects.set(name, { name, swaggerUrl });
-
-      // 尝试预加载规范
-      try {
-        const spec =
-          swaggerUrl.startsWith("http://") || swaggerUrl.startsWith("https://")
-            ? await loadSwaggerFromUrl(swaggerUrl)
-            : loadSwaggerFromFile(swaggerUrl);
-        projects.get(name)!.spec = spec;
-      } catch (e) {
-        // 忽略加载错误，用户可以稍后重试
-      }
-
-      // 保存到文件
-      saveProjects?.();
+      const baseProject: SwaggerProject = { name, swaggerUrl };
+      const { project } = await ensureProjectSpecLoaded(name, baseProject);
+      projects.set(name, project || baseProject);
 
       return {
         content: [
@@ -87,31 +100,18 @@ export function registerTools(
       }),
     },
     async ({ projectName }: { projectName: string }) => {
-      const project = projects.get(projectName);
+      const currentProject = projects.get(projectName);
+      const { project, error } = await ensureProjectSpecLoaded(
+        projectName,
+        currentProject,
+      );
       if (!project) {
         return {
-          content: [
-            {
-              type: "text",
-              text: `项目 "${projectName}" 未找到，请先使用 add_swagger_project 添加`,
-            },
-          ],
+          content: [{ type: "text", text: error || "加载失败" }],
         };
       }
-
-      // 如果还没加载spec，尝试加载
-      if (!project.spec) {
-        try {
-          project.spec =
-            project.swaggerUrl.startsWith("http://") ||
-            project.swaggerUrl.startsWith("https://")
-              ? await loadSwaggerFromUrl(project.swaggerUrl)
-              : loadSwaggerFromFile(project.swaggerUrl);
-        } catch (e) {
-          return {
-            content: [{ type: "text", text: `加载Swagger规范失败: ${e}` }],
-          };
-        }
+      if (project !== currentProject) {
+        projects.set(projectName, project);
       }
 
       const endpoints = extractEndpoints(project.spec);
@@ -154,13 +154,18 @@ export function registerTools(
       path: string;
       method: string;
     }) => {
-      const project = projects.get(projectName);
-      if (!project || !project.spec) {
+      const currentProject = projects.get(projectName);
+      const { project, error } = await ensureProjectSpecLoaded(
+        projectName,
+        currentProject,
+      );
+      if (!project) {
         return {
-          content: [
-            { type: "text", text: `项目 "${projectName}" 未找到或未加载` },
-          ],
+          content: [{ type: "text", text: error || "加载失败" }],
         };
+      }
+      if (project !== currentProject) {
+        projects.set(projectName, project);
       }
 
       const endpoints = extractEndpoints(project.spec);
@@ -190,13 +195,18 @@ export function registerTools(
       }),
     },
     async ({ projectName }: { projectName: string }) => {
-      const project = projects.get(projectName);
-      if (!project || !project.spec) {
+      const currentProject = projects.get(projectName);
+      const { project, error } = await ensureProjectSpecLoaded(
+        projectName,
+        currentProject,
+      );
+      if (!project) {
         return {
-          content: [
-            { type: "text", text: `项目 "${projectName}" 未找到或未加载` },
-          ],
+          content: [{ type: "text", text: error || "加载失败" }],
         };
+      }
+      if (project !== currentProject) {
+        projects.set(projectName, project);
       }
       const schemas = extractSchemas(project.spec);
       return {
@@ -222,13 +232,18 @@ export function registerTools(
       projectName: string;
       keyword: string;
     }) => {
-      const project = projects.get(projectName);
-      if (!project || !project.spec) {
+      const currentProject = projects.get(projectName);
+      const { project, error } = await ensureProjectSpecLoaded(
+        projectName,
+        currentProject,
+      );
+      if (!project) {
         return {
-          content: [
-            { type: "text", text: `项目 "${projectName}" 未找到或未加载` },
-          ],
+          content: [{ type: "text", text: error || "加载失败" }],
         };
+      }
+      if (project !== currentProject) {
+        projects.set(projectName, project);
       }
 
       const endpoints = extractEndpoints(project.spec);
@@ -286,8 +301,6 @@ export function registerTools(
           project.swaggerUrl.startsWith("https://")
             ? await loadSwaggerFromUrl(project.swaggerUrl)
             : loadSwaggerFromFile(project.swaggerUrl);
-        // 保存到文件
-        saveProjects?.();
         return {
           content: [
             {
@@ -323,13 +336,18 @@ export function registerTools(
       path: string;
       method: string;
     }) => {
-      const project = projects.get(projectName);
-      if (!project || !project.spec) {
+      const currentProject = projects.get(projectName);
+      const { project, error } = await ensureProjectSpecLoaded(
+        projectName,
+        currentProject,
+      );
+      if (!project) {
         return {
-          content: [
-            { type: "text", text: `项目 "${projectName}" 未找到或未加载` },
-          ],
+          content: [{ type: "text", text: error || "加载失败" }],
         };
+      }
+      if (project !== currentProject) {
+        projects.set(projectName, project);
       }
 
       // 使用 openapi-typescript 生成全量类型
@@ -399,8 +417,16 @@ export function registerTools(
         results.push(extracted);
       } else {
         // 如果没找到专门的类型，使用 generateTypeScriptByEndpoint 展开 Schema
-        const expandedCode = generateTypeScriptByEndpoint(path, method, project.spec);
-        if (expandedCode && !expandedCode.includes("未找到") && !expandedCode.includes("无需生成")) {
+        const expandedCode = generateTypeScriptByEndpoint(
+          path,
+          method,
+          project.spec,
+        );
+        if (
+          expandedCode &&
+          !expandedCode.includes("未找到") &&
+          !expandedCode.includes("无需生成")
+        ) {
           results.push(expandedCode);
         } else {
           results.push(`// 未能自动生成类型，请参考项目全量类型`);

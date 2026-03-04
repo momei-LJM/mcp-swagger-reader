@@ -1,12 +1,24 @@
 // @ts-nocheck
 // Swagger/OpenAPI 规范解析相关函数
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import type { SwaggerSpec, Endpoint, Schema, SchemaProperty } from "./types.js";
 import openapiTS, { astToString } from "openapi-typescript";
 
 // 缓存生成的类型，避免重复解析
 const typeCache = new Map<string, { timestamp: number; content: string }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
+
+// 获取临时目录（用户目录下）
+function getTempDir(): string {
+  const homedir = process.env.HOME || process.env.USERPROFILE || tmpdir();
+  const tempDir = join(homedir, ".mcp-swagger-reader", "temp");
+  if (!existsSync(tempDir)) {
+    mkdirSync(tempDir, { recursive: true });
+  }
+  return tempDir;
+}
 
 /**
  * 获取缓存的生成类型
@@ -44,11 +56,9 @@ export async function generateFullTypeScript(
 
   try {
     // 创建临时文件来存储规范（openapi-typescript 需要文件路径或 URL）
-    const tempDir = "./.temp";
-    if (!existsSync(tempDir)) {
-      mkdirSync(tempDir, { recursive: true });
-    }
-    const tempFile = `${tempDir}/${projectKey.replace(/[^a-z0-9]/gi, "_")}_spec.json`;
+    // 使用用户目录下的临时目录，避免污染项目目录
+    const tempDir = getTempDir();
+    const tempFile = join(tempDir, `${projectKey.replace(/[^a-z0-9]/gi, "_")}_spec.json`);
     writeFileSync(tempFile, JSON.stringify(spec));
 
     // 使用 openapi-typescript 生成类型
