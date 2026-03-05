@@ -1,11 +1,14 @@
 {
-  "name": "mcp-swagger-reader",
+  "name": "mcp-scribe",
   "version": "1.0.1",
   "description": "MCP tool to read and parse Swagger/OpenAPI specifications",
   "main": "dist/index.mjs",
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs"
+  },
+  "publishConfig": {
+    "registry": "http://nexus.hgj.net/repository/npm-internal/"
   },
   "files": [
     "dist",
@@ -21,9 +24,6 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
-    "openapi-typescript": "^7.13.0",
-    "quicktype": "^23.2.6",
-    "yaml": "^2.8.2",
     "zod": "^3.23.0"
   },
   "devDependencies": {

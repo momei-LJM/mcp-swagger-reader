@@ -1,101 +1,62 @@
 // @ts-nocheck
 // Swagger/OpenAPI 规范解析相关函数
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
-import type { SwaggerSpec, Endpoint, Schema, SchemaProperty } from "./types.js";
-import openapiTS, { astToString } from "openapi-typescript";
+import { readFileSync } from "fs";
+import type { SwaggerSpec, Endpoint, Schema } from "./types.js";
 
-// 缓存生成的类型，避免重复解析
-const typeCache = new Map<string, { timestamp: number; content: string }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
-
-// 获取临时目录（用户目录下）
-function getTempDir(): string {
-  const homedir = process.env.HOME || process.env.USERPROFILE || tmpdir();
-  const tempDir = join(homedir, ".mcp-swagger-reader", "temp");
-  if (!existsSync(tempDir)) {
-    mkdirSync(tempDir, { recursive: true });
-  }
-  return tempDir;
-}
+// 每个接口的类型缓存（懒加载生成）
+// key: "projectKey:method:path" -> value: generated TypeScript code
+const endpointTypeCache = new Map<
+  string,
+  { timestamp: number; params: string; response: string }
+>();
+const ENDPOINT_CACHE_TTL = 10 * 60 * 1000; // 10分钟
 
 /**
- * 获取缓存的生成类型
+ * 从缓存获取指定接口的类型，如果缓存中没有则实时生成并缓存
+ * @param projectKey 项目唯一标识
+ * @param path 接口路径
+ * @param method HTTP 方法
+ * @param spec Swagger 规范对象（用于生成）
+ * @returns Params 和 Response 类型代码
  */
-function getCachedTypes(projectKey: string): string | null {
-  const cached = typeCache.get(projectKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.content;
-  }
-  return null;
-}
-
-/**
- * 设置缓存的生成类型
- */
-function setCachedTypes(projectKey: string, content: string): void {
-  typeCache.set(projectKey, { timestamp: Date.now(), content });
-}
-
-/**
- * 使用 openapi-typescript 生成全量 TypeScript 类型
- * @param spec Swagger 规范对象
- * @param projectKey 项目唯一标识（用于缓存）
- * @returns TypeScript 类型代码
- */
-export async function generateFullTypeScript(
-  spec: SwaggerSpec,
+export function getCachedEndpointTypes(
   projectKey: string,
-): Promise<string> {
-  // 检查缓存
-  const cached = getCachedTypes(projectKey);
-  if (cached) {
-    return cached;
+  path: string,
+  method: string,
+  spec: SwaggerSpec,
+): { params: string; response: string } {
+  const cacheKey = `${projectKey}:${method.toUpperCase()}:${path}`;
+  const cached = endpointTypeCache.get(cacheKey);
+  const now = Date.now();
+
+  // 命中缓存且未过期
+  if (cached && now - cached.timestamp < ENDPOINT_CACHE_TTL) {
+    return { params: cached.params, response: cached.response };
   }
 
-  try {
-    // 创建临时文件来存储规范（openapi-typescript 需要文件路径或 URL）
-    // 使用用户目录下的临时目录，避免污染项目目录
-    const tempDir = getTempDir();
-    const tempFile = join(
-      tempDir,
-      `${projectKey.replace(/[^a-z0-9]/gi, "_")}_spec.json`,
-    );
-    writeFileSync(tempFile, JSON.stringify(spec));
+  // 缓存不存在或已过期，生成并缓存（懒加载）
+  const code = generateTypeScriptByEndpoint(path, method, spec);
 
-    // 使用 openapi-typescript 生成类型
-    const ast = await openapiTS(tempFile, {
-      exportType: true,
-      alphabetize: false,
-    });
+  const paramsMatch = code.match(
+    /export\s+(?:interface\s+T\w+Params|type\s+T\w+Params\s*=)[\s\S]*?(?=\n\/\/ ==========|$)/,
+  );
+  const responseMatch = code.match(
+    /export\s+(?:interface\s+T\w+Response|type\s+T\w+Response\s*=)[\s\S]*$/,
+  );
 
-    const types = astToString(ast);
-    setCachedTypes(projectKey, types);
-    return types;
-  } catch (e) {
-    return `// Error generating TypeScript: ${e}`;
-  }
+  const newCache = {
+    timestamp: now,
+    params: paramsMatch ? paramsMatch[0] : "",
+    response: responseMatch ? responseMatch[0] : "",
+  };
+
+  endpointTypeCache.set(cacheKey, newCache);
+
+  return { params: newCache.params, response: newCache.response };
 }
 
 /**
- * 从生成的类型中提取单个 Schema 类型
- * @param fullTypes 完整的 TypeScript 类型代码
- * @param schemaName Schema 名称
- * @returns 单个 Schema 的 TypeScript 定义
- */
-export function extractSchemaType(
-  fullTypes: string,
-  schemaName: string,
-): string {
-  // 匹配 export interface SchemaName { ... } 或 export type SchemaName = ...
-  const interfaceRegex = new RegExp(
-    `(export\\s+(?:interface|type)\\s+${schemaName}\\s*[{=][\\s\\S]*?)(?=\\n(?:export\\s|\\n\\s*\\n|\\Z))`,
-    "m",
-  );
-  const match = fullTypes.match(interfaceRegex);
-  return match ? match[1] : `// Schema "${schemaName}" not found`;
-}
+ * 解析 Swagger/OpenAPI JSON 内容
 
 /**
  * 解析 Swagger/OpenAPI JSON 内容
@@ -210,132 +171,12 @@ export function extractSchemas(spec: SwaggerSpec): Schema[] {
 }
 
 /**
- * 将 Swagger 类型转换为 TypeScript 类型
- */
-function swaggerTypeToTs(type: string, format?: string): string {
-  if (!type) return "any";
-
-  switch (type) {
-    case "string":
-      if (format === "date-time" || format === "date") return "string";
-      return "string";
-    case "number":
-    case "integer":
-      return "number";
-    case "boolean":
-      return "boolean";
-    case "array":
-      return "any[]";
-    case "object":
-      return "object";
-    default:
-      return "any";
-  }
-}
-
-/**
- * 解析单个属性，返回 TypeScript 类型字符串
- */
-function parseProperty(
-  propName: string,
-  schema: any,
-  spec: SwaggerSpec,
-  requiredFields: Set<string>,
-): { type: string; required: boolean } {
-  const required = requiredFields.has(propName);
-
-  // 处理 $ref 引用
-  if (schema.$ref) {
-    const refName = schema.$ref.replace("#/components/schemas/", "");
-    return { type: refName, required };
-  }
-
-  // 处理数组
-  if (schema.type === "array" && schema.items) {
-    if (schema.items.$ref) {
-      const refName = schema.items.$ref.replace("#/components/schemas/", "");
-      return { type: `${refName}[]`, required };
-    }
-    const itemType = swaggerTypeToTs(schema.items.type, schema.items.format);
-    return { type: `${itemType}[]`, required };
-  }
-
-  return {
-    type: swaggerTypeToTs(schema.type, schema.format),
-    required,
-  };
-}
-
-/**
- * 递归生成 TypeScript 类型
- */
-function generateTsType(
-  schema: any,
-  spec: SwaggerSpec,
-  visited: Set<string> = new Set(),
-): string {
-  if (!schema) return "any";
-
-  // 处理 $ref 引用
-  if (schema.$ref) {
-    const refName = schema.$ref.replace("#/components/schemas/", "");
-    return refName;
-  }
-
-  // 处理数组
-  if (schema.type === "array" && schema.items) {
-    return `${generateTsType(schema.items, spec, visited)}[]`;
-  }
-
-  // 处理基础类型
-  switch (schema.type) {
-    case "string":
-      return "string";
-    case "number":
-    case "integer":
-      return "number";
-    case "boolean":
-      return "boolean";
-    case "object":
-      if (schema.properties) {
-        const props = Object.entries(schema.properties)
-          .map(([key, val]: [string, any]) => {
-            const required = (schema.required || []).includes(key);
-            const optional = required ? "" : "?";
-            return `  ${key}${optional}: ${generateTsType(val, spec, visited)};`;
-          })
-          .join("\n");
-        return `{\n${props}\n}`;
-      }
-      return "Record<string, any>";
-    default:
-      return "any";
-  }
-}
-
-/**
  * Schema 展开结果类型
  */
 type ExpandedSchema =
   | { kind: "object"; content: string }
   | { kind: "primitive"; content: string }
   | { kind: "reference"; name: string };
-
-/**
- * 判断 Schema 是否为对象类型
- */
-function isObjectSchema(schema: any): boolean {
-  // 有 properties 的是对象
-  if (schema.properties) return true;
-  // 有 $ref 的是引用，需要递归判断
-  if (schema.$ref) return false; // 让调用方处理
-  // 有 allOf/oneOf/anyOf 的是组合类型，视为对象
-  if (schema.allOf || schema.oneOf || schema.anyOf) return true;
-  // 有 type 且不是 object 的是基础类型
-  if (schema.type && schema.type !== "object") return false;
-  // 默认视为对象
-  return true;
-}
 
 /**
  * 将 Schema 展开为 TypeScript interface 定义
@@ -785,61 +626,4 @@ export function generateTypeScriptByEndpoint(
   }
 
   return results.join("\n") || `// 无需生成的类型`;
-}
-
-/**
- * 生成 TypeScript interface 定义（使用 openapi-typescript）
- * @param schemaName Schema 名称
- * @param spec Swagger 规范对象
- * @param projectKey 项目唯一标识
- * @returns TypeScript interface 代码
- */
-export async function generateTypeScriptInterface(
-  schemaName: string,
-  spec: SwaggerSpec,
-  projectKey: string = "default",
-): Promise<string> {
-  try {
-    // 使用 openapi-typescript 生成全量类型
-    const fullTypes = await generateFullTypeScript(spec, projectKey);
-    if (fullTypes.startsWith("// Error")) {
-      return fullTypes;
-    }
-
-    // 提取单个 Schema 类型
-    return extractSchemaType(fullTypes, schemaName);
-  } catch (e) {
-    return `// Error generating TypeScript: ${e}`;
-  }
-}
-
-/**
- * 批量生成多个 TypeScript interface
- * @param schemaNames Schema 名称数组
- * @param spec Swagger 规范对象
- * @param projectKey 项目唯一标识
- * @returns TypeScript 代码
- */
-export async function generateTypeScriptInterfaces(
-  schemaNames: string[],
-  spec: SwaggerSpec,
-  projectKey: string = "default",
-): Promise<string> {
-  // 使用 openapi-typescript 生成全量类型
-  const fullTypes = await generateFullTypeScript(spec, projectKey);
-  if (fullTypes.startsWith("// Error")) {
-    return fullTypes;
-  }
-
-  // 提取需要的 Schema 类型
-  const results: string[] = [];
-  for (const name of schemaNames) {
-    const code = extractSchemaType(fullTypes, name);
-    if (!code.includes("not found")) {
-      results.push(code);
-      results.push("");
-    }
-  }
-
-  return results.join("\n").trim();
 }

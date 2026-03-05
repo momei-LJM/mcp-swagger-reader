@@ -9,6 +9,7 @@ import {
   extractEndpoints,
   extractSchemas,
   generateTypeScriptByEndpoint,
+  getCachedEndpointTypes,
 } from "./parser.js";
 
 async function ensureProjectSpecLoaded(
@@ -31,7 +32,9 @@ async function ensureProjectSpecLoaded(
       project.swaggerUrl.startsWith("https://")
         ? await loadSwaggerFromUrl(project.swaggerUrl)
         : loadSwaggerFromFile(project.swaggerUrl);
-    return { project: { ...project, spec } };
+    const loadedProject = { ...project, spec };
+
+    return { project: loadedProject };
   } catch (e) {
     return { error: `加载Swagger规范失败: ${e}` };
   }
@@ -299,6 +302,7 @@ export function registerTools(
           project.swaggerUrl.startsWith("https://")
             ? await loadSwaggerFromUrl(project.swaggerUrl)
             : loadSwaggerFromFile(project.swaggerUrl);
+
         return {
           content: [
             {
@@ -348,10 +352,18 @@ export function registerTools(
         projects.set(projectName, project);
       }
 
-      // 直接使用精准的单接口类型生成，避免全量类型生成导致响应过大
-      const code = generateTypeScriptByEndpoint(path, method, project.spec);
+      // 懒加载：从缓存获取，缓存不存在时自动生成并缓存
+      const cached = getCachedEndpointTypes(projectName, path, method, project.spec);
+      const code = [
+        `// ========== ${path} - ${method.toUpperCase()} ==========`,
+        "",
+        cached.params,
+        cached.response,
+      ]
+        .filter(Boolean)
+        .join("\n");
       return {
-        content: [{ type: "text", text: code }],
+        content: [{ type: "text", text: code || `// 无类型信息` }],
       };
     },
   );
