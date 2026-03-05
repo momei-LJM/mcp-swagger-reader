@@ -10,6 +10,7 @@ import {
   extractSchemas,
   generateTypeScriptByEndpoint,
   getCachedEndpointTypes,
+  clearEndpointTypeCache,
 } from "./parser.js";
 
 async function ensureProjectSpecLoaded(
@@ -283,7 +284,7 @@ export function registerTools(
   mcp.registerTool(
     "reload_swagger",
     {
-      description: "重新加载项目的Swagger规范",
+      description: "重新加载项目的Swagger规范，同时清除类型缓存",
       inputSchema: z.object({
         projectName: z.string().describe("项目名称"),
       }),
@@ -303,17 +304,40 @@ export function registerTools(
             ? await loadSwaggerFromUrl(project.swaggerUrl)
             : loadSwaggerFromFile(project.swaggerUrl);
 
+        // 重新加载后清除该项目的类型缓存
+        clearEndpointTypeCache(projectName);
+
         return {
           content: [
             {
               type: "text",
-              text: `项目 "${projectName}" 已重新加载，共 ${Object.keys(project.spec.paths || {}).length} 个路径`,
+              text: `项目 "${projectName}" 已重新加载，共 ${Object.keys(project.spec.paths || {}).length} 个路径，类型缓存已清除`,
             },
           ],
         };
       } catch (e) {
         return { content: [{ type: "text", text: `重新加载失败: ${e}` }] };
       }
+    },
+  );
+
+  // 工具：清除类型缓存
+  mcp.registerTool(
+    "clear_type_cache",
+    {
+      description: "清除指定项目的类型缓存，强制重新生成",
+      inputSchema: z.object({
+        projectName: z.string().optional().describe("项目名称，不传则清除所有缓存"),
+      }),
+    },
+    async ({ projectName }: { projectName?: string }) => {
+      clearEndpointTypeCache(projectName);
+      const msg = projectName
+        ? `已清除项目 "${projectName}" 的类型缓存`
+        : "已清除所有类型缓存";
+      return {
+        content: [{ type: "text", text: msg }],
+      };
     },
   );
 

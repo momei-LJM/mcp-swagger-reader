@@ -12,6 +12,24 @@ const endpointTypeCache = new Map<
 const ENDPOINT_CACHE_TTL = 10 * 60 * 1000; // 10分钟
 
 /**
+ * 清除指定项目的类型缓存
+ * @param projectKey 项目唯一标识
+ */
+export function clearEndpointTypeCache(projectKey?: string): void {
+  if (!projectKey) {
+    // 清除所有项目的缓存
+    endpointTypeCache.clear();
+    return;
+  }
+  // 清除指定项目的缓存
+  for (const key of endpointTypeCache.keys()) {
+    if (key.startsWith(`${projectKey}:`)) {
+      endpointTypeCache.delete(key);
+    }
+  }
+}
+
+/**
  * 从缓存获取指定接口的类型，如果缓存中没有则实时生成并缓存
  * @param projectKey 项目唯一标识
  * @param path 接口路径
